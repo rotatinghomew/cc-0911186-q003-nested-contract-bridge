@@ -34,13 +34,55 @@ CREATE TABLE IF NOT EXISTS manifests (
     status TEXT NOT NULL,
     PRIMARY KEY (name, version)
 );
+CREATE TABLE IF NOT EXISTS quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    batch_id TEXT NOT NULL,
+    cursor INTEGER NOT NULL,
+    record_index INTEGER NOT NULL,
+    schema_version TEXT,
+    error_code TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    details TEXT NOT NULL,
+    raw TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    replayed_at TEXT,
+    replay_attempts INTEGER NOT NULL DEFAULT 0,
+    last_replay_error TEXT,
+    UNIQUE (source, batch_id, record_index)
+);
 """
+
+# Columns added after the baseline schema.  ``open_store`` applies them to
+# existing databases so that a local store created by an older checkout keeps
+# working instead of losing data when reopened.
+FACT_COLUMNS = {
+    "kind": "TEXT",
+    "schema_version": "TEXT",
+    "contact": "TEXT",
+    "source_channel": "TEXT",
+    "contact_channels": "TEXT",
+    "enrollment_source": "TEXT",
+    "field_presence": "TEXT",
+    "field_origins": "TEXT",
+    "source_cursor": "INTEGER",
+    "updated_at": "TEXT",
+}
+
+
+def _ensure_columns(connection: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+    for name, declaration in columns.items():
+        if name not in existing:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
 
 
 def open_store(path: str | Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA)
+    _ensure_columns(connection, "facts", FACT_COLUMNS)
+    connection.commit()
     return connection
 
 
